@@ -20,85 +20,15 @@
 name: Release
 
 on:
-  workflow_dispatch
+  push
 
 jobs:
-  release:
-    name: Release
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      release-version: ${{ steps.package_release.outputs.version }}
-    steps:
-      - uses: actions/checkout@v3.0.2
-      - uses: actions/setup-dotnet@v2.1.0
-        with:
-          dotnet-version: '6.0'
-
-      # Build and package everything
-      - name: Package release
-        id: package_release
-        run: |
-          VERSION=`cat semver.txt`
-          echo "##[set-output name=version;]$VERSION"
-          dotnet publish --configuration Release /p:Version=$VERSION --output ./gh-pages src/CycloneDX.WebTool/CycloneDX.WebTool.csproj
-          cd gh-pages/wwwroot
-          zip -r ../../CycloneDX.WebTool.zip ./
-          tar -zcvf ../../CycloneDX.WebTool.tar.gz ./
-          cd ../..
-
-      - name: Create github release and git tag for release
-        id: create_release
-        uses: actions/create-release@v1.1.4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          release_name: ${{ steps.package_release.outputs.version }}
-          tag_name: v${{ steps.package_release.outputs.version }}
-          draft: false
-          prerelease: false
-
-      - name: Upload zip package to github release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: CycloneDX.WebTool.zip
-          asset_name: CycloneDX.WebTool.${{ steps.package_release.outputs.version }}.zip
-          asset_content_type: application/zip
-
-      - name: Upload tar.gz package to github release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: CycloneDX.WebTool.tar.gz
-          asset_name: CycloneDX.WebTool.${{ steps.package_release.outputs.version }}.tar.gz
-          asset_content_type: application/gzip
-      
-      - name: Update GitHub pages
-        run: |
-          git fetch origin gh-pages:gh-pages
-          git config --local user.email "$(git show --format="%aN" | head -n 1)"
-          git config --local user.name  "$(git show --format="%aE" | head -n 1)"
-          git add .
-          git stash
-          git checkout gh-pages
-          cp -rv ./gh-pages/wwwroot/* ./docs
-          git add docs
-          git commit -m "Update GitHub pages" || true
-          git push https://${{ github.actor }}:${{ github.token }}@github.com/${{ github.repository }}.git HEAD:gh-pages
-
   docker:
     name: docker
     runs-on: ubuntu-latest
-    needs:
-      - release
     env:
       IMAGE_NAME: cyclonedx-web-tool
-      IMAGE_VERSION: ${{ needs.release.outputs.release-version }}
+      IMAGE_VERSION: 0.5.2
 
     timeout-minutes: 5
     steps:
@@ -107,17 +37,14 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
       - name: Build image and push
         uses: docker/build-push-action@v3
         with:
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: false
           build-args:
             VERSION=${{ env.IMAGE_VERSION }}
           tags: |
